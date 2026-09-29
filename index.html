@@ -89,6 +89,7 @@
         </div>
     </div>
 
+    <!-- Rating Modal (Driver & Customer) -->
     <div id="ratingModal" class="fixed inset-0 z-[10002] bg-slate-900/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
         <form onsubmit="submitRatingOrder(event)" class="bg-white dark:bg-slate-800 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl border border-gray-100 dark:border-slate-700 text-center">
             <input type="hidden" id="ratingOrderId">
@@ -122,6 +123,7 @@
         </form>
     </div>
 
+    <!-- Edit User Modal -->
     <div id="editUserModal" class="fixed inset-0 z-[10001] bg-slate-900/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
         <div class="bg-white dark:bg-slate-800 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl border border-gray-100 dark:border-slate-700">
             <div class="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-slate-700">
@@ -670,9 +672,9 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'nadzar-raion-app-v1';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'nadzar-raion-app-v2';
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "AIzaSyDummyKeyForGitHubHosting", projectId: "nadzar-raion" };
 
         let db = null;
@@ -773,7 +775,7 @@
                         renderAllViews();
                         if (activeChatOrderId) renderChatMessages();
                     }
-                }, (err) => { console.warn("Orders snapshot fallback active"); });
+                }, (err) => { console.warn("Orders snapshot error:", err); });
 
                 onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'users_store'), (snap) => {
                     if (snap.exists() && snap.data().list) {
@@ -782,9 +784,29 @@
                         checkAuth();
                         renderAllViews();
                     }
-                }, (err) => { console.warn("Users snapshot fallback active"); });
-            } catch (e) {}
+                }, (err) => { console.warn("Users snapshot error:", err); });
+            } catch (e) {
+                console.warn("Firestore listener setup error:", e);
+            }
         }
+
+        // Periodic cloud polling fallback for multi-device sync
+        setInterval(async () => {
+            if (db && isFirebaseConnected) {
+                try {
+                    const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders_store'));
+                    if (snap.exists() && snap.data().list) {
+                        const remoteOrders = snap.data().list;
+                        if (JSON.stringify(remoteOrders) !== JSON.stringify(cloudOrders)) {
+                            cloudOrders = remoteOrders;
+                            localStorage.setItem('nadzar_raion_orders', JSON.stringify(cloudOrders));
+                            renderAllViews();
+                            if (activeChatOrderId) renderChatMessages();
+                        }
+                    }
+                } catch (e) {}
+            }
+        }, 3000);
 
         function escapeHtml(str) {
             if (!str) return '';
