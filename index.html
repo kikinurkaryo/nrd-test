@@ -52,7 +52,6 @@
 
     <div id="toastContainer" class="fixed top-4 right-4 z-[10000] flex flex-col gap-2 max-w-sm w-full pointer-events-none px-4 sm:px-0"></div>
 
-    <!-- Cancel Order Modal -->
     <div id="cancelModal" class="fixed inset-0 z-[10000] bg-slate-900/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
         <form onsubmit="submitCancelOrder(event)" class="bg-white dark:bg-slate-800 rounded-3xl max-w-sm w-full p-5 space-y-3 shadow-2xl border border-gray-100 dark:border-slate-700">
             <div class="flex items-center gap-3">
@@ -77,7 +76,6 @@
         </form>
     </div>
 
-    <!-- Confirmation Modal -->
     <div id="confirmModal" class="fixed inset-0 z-[10000] bg-slate-900/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
         <div class="bg-white dark:bg-slate-800 rounded-3xl max-w-xs w-full p-5 space-y-4 shadow-2xl border border-gray-100 dark:border-slate-700 text-center">
             <div class="w-12 h-12 rounded-2xl bg-amber-100 text-amber-600 dark:bg-amber-900/50 dark:text-amber-400 mx-auto flex items-center justify-center text-xl font-bold">
@@ -91,7 +89,6 @@
         </div>
     </div>
 
-    <!-- Rating & Review Modal -->
     <div id="ratingModal" class="fixed inset-0 z-[10002] bg-slate-900/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
         <form onsubmit="submitRatingOrder(event)" class="bg-white dark:bg-slate-800 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl border border-gray-100 dark:border-slate-700 text-center">
             <input type="hidden" id="ratingOrderId">
@@ -125,7 +122,6 @@
         </form>
     </div>
 
-    <!-- Edit User Modal (Admin) -->
     <div id="editUserModal" class="fixed inset-0 z-[10001] bg-slate-900/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
         <div class="bg-white dark:bg-slate-800 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl border border-gray-100 dark:border-slate-700">
             <div class="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-slate-700">
@@ -671,7 +667,33 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    <script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'nadzar-raion-app-v1';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "AIzaSyDummyKeyForGitHubHosting", projectId: "nadzar-raion" };
+
+        let db = null;
+        let auth = null;
+        let isFirebaseConnected = false;
+
+        try {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+            if (token) {
+                signInWithCustomToken(auth, token).catch(() => signInAnonymously(auth));
+            } else {
+                signInAnonymously(auth).catch(() => {});
+            }
+            isFirebaseConnected = true;
+        } catch (e) {
+            console.warn("Using local storage fallback for sync:", e);
+        }
+
         let currentUser = null;
         let customerMap = null, driverMap = null;
         let customerMapMarkers = [];
@@ -688,6 +710,9 @@
             { name: "", lat: null, lng: null }
         ];
 
+        let cloudOrders = [];
+        let cloudUsers = [];
+
         const DEFAULT_USERS = [
             { id: 'USR-101', name: 'Zaskia Agustina', phone: '081234567890', email: 'zaskia@nadzar.com', password: '123', accountType: 'customer', reviews: [] },
             { id: 'DRV-201', name: 'Ahmad Supriadi', phone: '089876543210', email: 'ahmad@nadzar.com', password: '123', accountType: 'driver', vehicleType: 'Motor', plateNumber: 'D 4589 KAZ', reviews: [] },
@@ -695,6 +720,7 @@
         ];
 
         function getRegisteredUsers() {
+            if (cloudUsers.length > 0) return cloudUsers;
             try {
                 const stored = localStorage.getItem('nadzar_registered_users');
                 if (stored) return JSON.parse(stored);
@@ -703,11 +729,18 @@
         }
 
         function saveRegisteredUsers(users) {
+            cloudUsers = users;
             localStorage.setItem('nadzar_registered_users', JSON.stringify(users));
+            if (db && isFirebaseConnected) {
+                try {
+                    setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users_store'), { list: users }).catch(() => {});
+                } catch (e) {}
+            }
             window.dispatchEvent(new Event('nadzar_storage_update'));
         }
 
         function getStoredOrders() {
+            if (cloudOrders.length > 0) return cloudOrders;
             try {
                 const stored = localStorage.getItem('nadzar_raion_orders');
                 if (stored) return JSON.parse(stored);
@@ -716,8 +749,41 @@
         }
 
         function saveStoredOrders(orders) {
+            cloudOrders = orders;
             localStorage.setItem('nadzar_raion_orders', JSON.stringify(orders));
+            if (db && isFirebaseConnected) {
+                try {
+                    setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders_store'), { list: orders }).catch(() => {});
+                } catch (e) {}
+            }
             window.dispatchEvent(new Event('nadzar_storage_update'));
+        }
+
+        window.getRegisteredUsers = getRegisteredUsers;
+        window.saveRegisteredUsers = saveRegisteredUsers;
+        window.getStoredOrders = getStoredOrders;
+        window.saveStoredOrders = saveStoredOrders;
+
+        if (db && isFirebaseConnected) {
+            try {
+                onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'orders_store'), (snap) => {
+                    if (snap.exists() && snap.data().list) {
+                        cloudOrders = snap.data().list;
+                        localStorage.setItem('nadzar_raion_orders', JSON.stringify(cloudOrders));
+                        renderAllViews();
+                        if (activeChatOrderId) renderChatMessages();
+                    }
+                }, (err) => { console.warn("Orders snapshot fallback active"); });
+
+                onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'users_store'), (snap) => {
+                    if (snap.exists() && snap.data().list) {
+                        cloudUsers = snap.data().list;
+                        localStorage.setItem('nadzar_registered_users', JSON.stringify(cloudUsers));
+                        checkAuth();
+                        renderAllViews();
+                    }
+                }, (err) => { console.warn("Users snapshot fallback active"); });
+            } catch (e) {}
         }
 
         function escapeHtml(str) {
@@ -729,10 +795,12 @@
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#039;');
         }
+        window.escapeHtml = escapeHtml;
 
         function formatRupiah(amount) {
             return 'Rp ' + (amount || 0).toLocaleString('id-ID');
         }
+        window.formatRupiah = formatRupiah;
 
         function getUserRatingInfo(identifier) {
             const users = getRegisteredUsers();
@@ -743,6 +811,7 @@
             }
             return { text: '★ Baru', avg: '5.0', count: 0 };
         }
+        window.getUserRatingInfo = getUserRatingInfo;
 
         function showToast(message, type = 'info') {
             const container = document.getElementById('toastContainer');
@@ -765,12 +834,14 @@
                 setTimeout(() => toast.remove(), 300);
             }, 4000);
         }
+        window.showToast = showToast;
 
         function showConfirm(msg, callback) {
             confirmCallback = callback;
             document.getElementById('confirmModalText').innerText = msg;
             document.getElementById('confirmModal').classList.remove('hidden');
         }
+        window.showConfirm = showConfirm;
 
         function handleConfirmResponse(isConfirmed) {
             document.getElementById('confirmModal').classList.add('hidden');
@@ -779,12 +850,14 @@
             }
             confirmCallback = null;
         }
+        window.handleConfirmResponse = handleConfirmResponse;
 
         function getServiceIcon(service) {
             if (service === 'food') return '<i class="fa-solid fa-utensils text-amber-500"></i>';
             if (service === 'delivery') return '<i class="fa-solid fa-box text-blue-500"></i>';
             return '<i class="fa-solid fa-motorcycle text-brand-600"></i>';
         }
+        window.getServiceIcon = getServiceIcon;
 
         function getStatusBadge(status) {
             if (status === 'pending') return `<span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"><i class="fa-solid fa-clock mr-1"></i>Mencari Driver</span>`;
@@ -793,6 +866,7 @@
             if (status === 'cancelled') return `<span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-300"><i class="fa-solid fa-circle-xmark mr-1"></i>Dibatalkan</span>`;
             return `<span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-gray-100 text-gray-800">${status}</span>`;
         }
+        window.getStatusBadge = getStatusBadge;
 
         function getCurrentTime() {
             const d = new Date();
@@ -817,11 +891,13 @@
             }
             return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}${waypointsParam}&travelmode=driving`;
         }
+        window.getGoogleMapsDirUrl = getGoogleMapsDirUrl;
 
         function getSingleWaypointNavUrl(lat, lng) {
             if (!lat || !lng) return 'https://maps.google.com';
             return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
         }
+        window.getSingleWaypointNavUrl = getSingleWaypointNavUrl;
 
         async function searchLocationForPoint(index) {
             const input = document.getElementById(`searchInput-${index}`);
@@ -852,6 +928,7 @@
                 showToast('Gagal terhubung ke layanan lokasi.', 'error');
             }
         }
+        window.searchLocationForPoint = searchLocationForPoint;
 
         function updateDriverMapVisuals() {
             if (!driverMap) return;
@@ -889,6 +966,7 @@
                 }
             }
         }
+        window.updateDriverMapVisuals = updateDriverMapVisuals;
 
         function getCurrentLocationForPoint(index = 0) {
             if (!navigator.geolocation) {
@@ -929,6 +1007,7 @@
                 { enableHighAccuracy: true, timeout: 10000 }
             );
         }
+        window.getCurrentLocationForPoint = getCurrentLocationForPoint;
 
         function switchAuthTab(tab) {
             const tabs = { 'cust-login': 'tabAuthCustLogin', 'drv-login': 'tabAuthDrvLogin', 'admin-login': 'tabAuthAdminLogin' };
@@ -946,6 +1025,7 @@
             const f = document.getElementById(forms[tab]);
             if (f) f.classList.remove('hidden');
         }
+        window.switchAuthTab = switchAuthTab;
 
         function doLogin(e, idField, passField, type, okMsg, failMsg) {
             e.preventDefault();
@@ -965,6 +1045,9 @@
         function handleCustomerLogin(e) { doLogin(e, 'custLoginId', 'custLoginPassword', 'customer', u => `Selamat datang, ${u.name}!`, 'Email / No. HP atau Kata Sandi Pelanggan tidak cocok!'); }
         function handleDriverLogin(e) { doLogin(e, 'drvLoginId', 'drvLoginPassword', 'driver', u => `Selamat bekerja, Driver ${u.name}!`, 'Email / No. HP atau Kata Sandi Driver salah!'); }
         function handleAdminLogin(e) { doLogin(e, 'adminLoginId', 'adminLoginPassword', 'admin', () => 'Login Admin Berhasil!', 'Akses Admin Gagal! Periksa Email/Password Admin.'); }
+        window.handleCustomerLogin = handleCustomerLogin;
+        window.handleDriverLogin = handleDriverLogin;
+        window.handleAdminLogin = handleAdminLogin;
 
         function logout() {
             currentUser = null;
@@ -972,6 +1055,7 @@
             checkAuth();
             showToast('Anda telah keluar dari akun.', 'info');
         }
+        window.logout = logout;
 
         function checkAuth() {
             const authView = document.getElementById('authView');
@@ -1026,12 +1110,16 @@
             }
             renderAllViews();
         }
+        window.checkAuth = checkAuth;
 
         function openAdminModal() {
             document.getElementById('adminModal').classList.remove('hidden');
             renderAdminUserList();
         }
+        window.openAdminModal = openAdminModal;
+
         function closeAdminModal() { document.getElementById('adminModal').classList.add('hidden'); }
+        window.closeAdminModal = closeAdminModal;
 
         function switchAdminSubTab(subTab) {
             activeAdminSubTab = subTab;
@@ -1052,6 +1140,7 @@
             document.getElementById('adminOrderFilterBar').classList.toggle('hidden', subTab !== 'orders');
             renderAdminUserList();
         }
+        window.switchAdminSubTab = switchAdminSubTab;
 
         function setAdminOrderFilter(filter) {
             activeAdminOrderFilter = filter;
@@ -1064,9 +1153,13 @@
             });
             renderAdminUserList();
         }
+        window.setAdminOrderFilter = setAdminOrderFilter;
 
         function openAddUserForm() { document.getElementById('addUserFormContainer').classList.remove('hidden'); }
+        window.openAddUserForm = openAddUserForm;
+
         function closeAddUserForm() { document.getElementById('addUserFormContainer').classList.add('hidden'); }
+        window.closeAddUserForm = closeAddUserForm;
 
         function openEditUserModal(userId) {
             const users = getRegisteredUsers();
@@ -1089,10 +1182,12 @@
             toggleEditDriverFields();
             document.getElementById('editUserModal').classList.remove('hidden');
         }
+        window.openEditUserModal = openEditUserModal;
 
         function closeEditUserModal() {
             document.getElementById('editUserModal').classList.add('hidden');
         }
+        window.closeEditUserModal = closeEditUserModal;
 
         function toggleEditDriverFields() {
             const type = document.getElementById('editAccType').value;
@@ -1103,6 +1198,7 @@
                 driverGroup.classList.add('hidden');
             }
         }
+        window.toggleEditDriverFields = toggleEditDriverFields;
 
         function saveEditUser(e) {
             e.preventDefault();
@@ -1141,6 +1237,7 @@
             renderAdminUserList();
             showToast(`Data ${updatedType === 'driver' ? 'Driver' : 'Pelanggan'} (${updatedUser.name}) berhasil diperbarui!`, 'success');
         }
+        window.saveEditUser = saveEditUser;
 
         function renderAdminUserList() {
             const users = getRegisteredUsers();
@@ -1276,6 +1373,7 @@
                 }
             });
         }
+        window.adminResetOrderDriver = adminResetOrderDriver;
 
         function saveNewUser(e) {
             e.preventDefault();
@@ -1297,6 +1395,7 @@
             renderAdminUserList();
             showToast(`Akun ${type === 'driver' ? 'Driver' : 'Pelanggan'} baru berhasil ditambahkan!`, 'success');
         }
+        window.saveNewUser = saveNewUser;
 
         function deleteUser(userId) {
             showConfirm('Apakah Anda yakin ingin menghapus akun user ini?', () => {
@@ -1305,6 +1404,7 @@
                 showToast('Akun telah dihapus.', 'info');
             });
         }
+        window.deleteUser = deleteUser;
 
         function selectService(service) {
             selectedServiceType = service;
@@ -1317,6 +1417,7 @@
             });
             calculateFare();
         }
+        window.selectService = selectService;
 
         function addWaypoint() {
             if (customerWaypoints.length >= 5) { showToast('Maksimal 5 titik perjalanan per order!', 'warning'); return; }
@@ -1333,6 +1434,7 @@
             updateCustomerMapVisuals();
             showToast(`Titik ${customerWaypoints.length} berhasil ditambahkan. Silakan isi lokasi.`, 'success');
         }
+        window.addWaypoint = addWaypoint;
 
         function removeWaypoint(index) {
             if (customerWaypoints.length <= 2) { showToast('Minimal 2 titik lokasi (Penjemputan & Tujuan)!', 'warning'); return; }
@@ -1343,11 +1445,13 @@
             updateCustomerMapVisuals();
             showToast('Titik berhasil dihapus.', 'info');
         }
+        window.removeWaypoint = removeWaypoint;
 
         function setActivePickingWaypoint(index) {
             activePickingWaypointIndex = index;
             renderWaypointsUI();
         }
+        window.setActivePickingWaypoint = setActivePickingWaypoint;
 
         function renderWaypointsUI() {
             const bar = document.getElementById('quickPointSelectorBar');
@@ -1435,6 +1539,7 @@
             document.getElementById('pointsCountDisplay').innerText = `${customerWaypoints.length} Titik (${f.extraStopsCount} Ekstra)`;
             document.getElementById('extraStopsFeeDisplay').innerText = formatRupiah(f.extraStopsFee);
         }
+        window.calculateFare = calculateFare;
 
         function initMaps() {
             try {
@@ -1478,6 +1583,7 @@
                 console.error("Map initialization error:", e);
             }
         }
+        window.initMaps = initMaps;
 
         function updateCustomerMapVisuals() {
             if (!customerMap) return;
@@ -1502,6 +1608,7 @@
                 customerMap.setView(latLngs[0], 15);
             }
         }
+        window.updateCustomerMapVisuals = updateCustomerMapVisuals;
 
         function createOrder() {
             if (!currentUser || currentUser.accountType !== 'customer') { showToast('Hanya akun pelanggan yang dapat membuat pesanan!', 'warning'); return; }
@@ -1546,6 +1653,7 @@
             renderAllViews();
             showToast(`Pesanan #${newOrder.id} (${customerWaypoints.length} titik) berhasil dibuat!`, 'success');
         }
+        window.createOrder = createOrder;
 
         function cocolOrder(orderId) {
             if (!currentUser || (currentUser.accountType !== 'driver' && currentUser.accountType !== 'admin')) {
@@ -1565,6 +1673,7 @@
                 showToast(`Orderan #${orderId} berhasil di-cocol!`, 'success');
             }
         }
+        window.cocolOrder = cocolOrder;
 
         const CANCEL_OTHER = 'Lainnya (tulis manual)';
         const CANCEL_REASONS = {
@@ -1615,11 +1724,13 @@
             toggleCancelManual();
             document.getElementById('cancelModal').classList.remove('hidden');
         }
+        window.openCancelModal = openCancelModal;
 
         function closeCancelModal() {
             document.getElementById('cancelModal').classList.add('hidden');
             cancelTargetOrderId = null;
         }
+        window.closeCancelModal = closeCancelModal;
 
         function toggleCancelManual() {
             const selected = document.querySelector('input[name="cancelReasonRadio"]:checked');
@@ -1631,6 +1742,7 @@
                 manual.classList.add('hidden');
             }
         }
+        window.toggleCancelManual = toggleCancelManual;
 
         function submitCancelOrder(e) {
             e.preventDefault();
@@ -1682,6 +1794,7 @@
             if (!document.getElementById('adminModal').classList.contains('hidden')) renderAdminUserList();
             showToast('Pesanan berhasil dibatalkan.', 'info');
         }
+        window.submitCancelOrder = submitCancelOrder;
 
         function renderCancelInfo(order) {
             let html = '';
@@ -2032,11 +2145,13 @@
 
             renderChatMessages();
         }
+        window.openChat = openChat;
 
         function closeChat() {
             document.getElementById('chatModal').classList.add('hidden');
             activeChatOrderId = null;
         }
+        window.closeChat = closeChat;
 
         function renderChatMessages() {
             const container = document.getElementById('chatMessagesContainer');
@@ -2084,11 +2199,13 @@
             input.value = '';
             renderChatMessages();
         }
+        window.sendMessage = sendMessage;
 
         function sendQuickMessage(text) {
             document.getElementById('chatInput').value = text;
             sendMessage(new Event('submit'));
         }
+        window.sendQuickMessage = sendQuickMessage;
 
         function completeCurrentOrder() {
             if (!activeChatOrderId) return;
@@ -2111,6 +2228,7 @@
                 setTimeout(() => openRatingModal(order.id, targetRole), 500);
             }
         }
+        window.completeCurrentOrder = completeCurrentOrder;
 
         function setRatingValue(val) {
             document.getElementById('selectedStarValue').value = val;
@@ -2123,6 +2241,7 @@
                 }
             });
         }
+        window.setRatingValue = setRatingValue;
 
         function openRatingModal(orderId, targetRole = 'driver') {
             const order = getStoredOrders().find(o => o.id === orderId);
@@ -2139,10 +2258,12 @@
             setRatingValue(5);
             document.getElementById('ratingModal').classList.remove('hidden');
         }
+        window.openRatingModal = openRatingModal;
 
         function closeRatingModal() {
             document.getElementById('ratingModal').classList.add('hidden');
         }
+        window.closeRatingModal = closeRatingModal;
 
         function submitRatingOrder(e) {
             e.preventDefault();
@@ -2198,6 +2319,7 @@
             renderAllViews();
             showToast(`Terima kasih! Ulasan bintang ${ratingVal} telah dikirim untuk ${isRatingDriver ? 'driver' : 'pelanggan'}.`, 'success');
         }
+        window.submitRatingOrder = submitRatingOrder;
 
         function renderAllViews() {
             renderCustomerOrders();
